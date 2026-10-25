@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -43,6 +44,9 @@ _WRITE_EVENTS: dict[str, tuple[tuple[int, ...], tuple[int, ...]]] = {
     "shutil.copytree": ((1,), ()),
     "shutil.move": ((0, 1), ()),
     "shutil.rmtree": ((0,), ()),
+    # Windows: shutil.copy2 copies through CopyFile2 without an "open" or shutil.copyfile event.
+    "_winapi.CopyFile2": ((1,), ()),
+    "_winapi.CreateJunction": ((1,), ()),
 }
 
 
@@ -111,6 +115,9 @@ def _sqlite_candidate_paths(database: str) -> list[str]:
         decoded = unquote(rest)
         if decoded and decoded != ":memory:":
             paths.append(decoded)
+            # On Windows SQLite opens file:///C:/x as C:/x.
+            if re.match(r"/[A-Za-z]:", decoded):
+                paths.append(decoded[1:])
     return paths
 
 

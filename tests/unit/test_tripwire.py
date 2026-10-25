@@ -1,6 +1,7 @@
 import os
 import shutil
 import sqlite3
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -52,6 +53,16 @@ def test_writes_under_protected_root_are_blocked(profile: Path, outside: Path, n
     assert sorted(p.name for p in (profile / "User").iterdir()) == ["settings.json"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
+def test_junction_into_protected_root_is_blocked(profile: Path, tmp_path: Path) -> None:
+    import _winapi
+
+    install_tripwire((profile,))
+    with pytest.raises(RuntimeError, match="tripwire"):
+        _winapi.CreateJunction(str(tmp_path), str(profile / "User" / "junction"))
+    assert not (profile / "User" / "junction").exists()
+
+
 def test_reads_and_outside_writes_are_allowed(profile: Path, tmp_path: Path) -> None:
     install_tripwire((profile,))
     assert (profile / "User/settings.json").read_text(encoding="utf-8") == "{}"
@@ -68,11 +79,12 @@ def test_sqlite_opens_of_protected_paths_are_blocked(profile: Path, form: str) -
     db = profile / "User" / "state db.vscdb"
     sqlite3.connect(db).close()
     posix = db.as_posix()
+    rooted = posix if posix.startswith("/") else f"/{posix}"
     database = {
         "plain": str(db),
         "uri": f"file:{posix}?mode=ro&immutable=1",
-        "uri_authority": f"file://{posix}?mode=ro",
-        "uri_localhost": f"file://localhost{posix}",
+        "uri_authority": f"file://{rooted}?mode=ro",
+        "uri_localhost": f"file://localhost{rooted}",
         "uri_percent": f"file:{posix.replace(' ', '%20')}?mode=ro",
     }[form]
     install_tripwire((profile,))

@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from cursor_portability.cli.main import main
@@ -13,4 +14,4 @@ def test_cli_configures_home_redaction_for_log_records(fake_home: Path) -> None:
         "cursor_portability.test", logging.WARNING, __file__, 1, "opened %s", (project,), None
     )
     assert RedactionFilter().filter(record)
-    assert record.getMessage() == "opened ~/project"
+    assert record.getMessage() == f"opened ~{os.sep}project"

@@ -1,6 +1,9 @@
 import hashlib
 import json
+import sys
 from pathlib import Path
+
+import pytest
 
 from cursor_portability.planning.config_merge import (
     ConfigConflict,
@@ -146,6 +149,7 @@ def test_snippet_planning_does_not_create_destination_dir(tmp_path: Path) -> Non
     assert [op.kind for op in ops] == ["create"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="NTFS cannot store ':' in a file name")
 def test_snippet_with_unsafe_file_name_is_skipped(tmp_path: Path) -> None:
     bundle, dest_user = _layout(tmp_path, "snippets/a:b.json", '{"s": {"body": "x"}}', None)
     ops, _, warnings, _ = plan_snippet_merges(

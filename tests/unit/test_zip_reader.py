@@ -21,11 +21,18 @@ def _symlink_entry() -> zipfile.ZipInfo:
     return info
 
 
+def _raw_name_entry(name: str) -> zipfile.ZipInfo:
+    # ZipInfo() rewrites os.sep to "/" on Windows; set the stored name directly.
+    info = zipfile.ZipInfo("placeholder")
+    info.filename = name
+    return info
+
+
 @pytest.mark.parametrize(
     "entries",
     [
         [("../evil.txt", b"x")],
-        [("dir\\file.txt", b"x")],
+        [(_raw_name_entry("dir\\file.txt"), b"x")],
         [("a.txt", b"x"), ("a.txt", b"y")],
         [("A.txt", b"x"), ("a.txt", b"y")],
         [(_symlink_entry(), b"/etc/passwd")],

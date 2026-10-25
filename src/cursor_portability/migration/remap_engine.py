@@ -22,6 +22,12 @@ from cursor_portability.planning.workspace_id import (
     workspace_id_for_folder,
 )
 from cursor_portability.platform.process_probe import effective_running, probe_cursor_running
+from cursor_portability.remap.json_links import (
+    ChatLinkMismatch,
+    FolderLink,
+    link_mismatches,
+    rewrite_links,
+)
 from cursor_portability.remap.sites import DbUpdatePlan, WorkspaceIdUpdate, apply_db_updates
 from cursor_portability.security.json_strict import dumps_canonical, loads_strict
 from cursor_portability.security.tripwire import allow_profile_writes
@@ -34,6 +40,7 @@ from cursor_portability.storage.sqlite_snapshot import cold_copy_sqlite_set, set
 
 # A hot -journal left beside a replaced main file would be rolled back into it on next open.
 _GLOBAL_SIDECARS = ("-wal", "-shm", "-journal")
+_LINK_FIELDS = frozenset({"from_id", "to_id", "from_path", "to_path", "from_uri", "to_uri"})
 
 
 @dataclass(frozen=True)
@@ -74,6 +81,39 @@ def _valid_update(upd: object) -> bool:
     )
 
 
+def _valid_link(link: object) -> bool:
+    if not isinstance(link, dict) or set(link) != _LINK_FIELDS:
+        return False
+    paths = (link["from_path"], link["to_path"])
+    uris = (link["from_uri"], link["to_uri"])
+    return (
+        is_folder_workspace_id(link["from_id"])
+        and is_folder_workspace_id(link["to_id"])
+        and all(isinstance(p, str) and p.startswith("/") and "\0" not in p for p in paths)
+        and all(isinstance(u, str) and u.startswith("file://") and "\0" not in u for u in uris)
+    )
+
+
+def _valid_link_counts(counts: object) -> bool:
+    if not isinstance(counts, dict) or set(counts) != {
+        "chat_headers",
+        "chat_records",
+        "agent_state",
+    }:
+        return False
+    agent = counts["agent_state"]
+    return (
+        _is_count(counts["chat_headers"])
+        and _is_count(counts["chat_records"])
+        and isinstance(agent, dict)
+        and all(isinstance(k, str) and _is_count(v) for k, v in agent.items())
+    )
+
+
+def _folder_links(db_op: dict[str, Any]) -> tuple[FolderLink, ...]:
+    return tuple(FolderLink(**link) for link in db_op["folder_links"])
+
+
 def _valid_workspace_copy(op: dict[str, Any]) -> bool:
     merged = op.get("merged_ubuntu_ids", [])
     return (
@@ -96,9 +136,17 @@ def _remap_operations(body: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[
         kind = op.get("kind") if isinstance(op, dict) else None
         if kind == "workspace_copy" and _valid_workspace_copy(op):
             ws_ops.append(op)
-        elif kind == "db_update" and isinstance(op.get("updates"), list):
+        elif (
+            kind == "db_update"
+            and isinstance(op.get("updates"), list)
+            and isinstance(op.get("folder_links"), list)
+        ):
             if not all(_valid_update(u) for u in op["updates"]):
                 raise AppError(ErrorCode.PLAN_INVALID, "invalid db_update entry")
+            if not all(_valid_link(link) for link in op["folder_links"]):
+                raise AppError(ErrorCode.PLAN_INVALID, "invalid folder link")
+            if not _valid_link_counts(op.get("link_rewrites")):
+                raise AppError(ErrorCode.PLAN_INVALID, "invalid link rewrite counts")
             db_ops.append(op)
         else:
             raise AppError(ErrorCode.PLAN_INVALID, "invalid remap operation", {"kind": kind})
@@ -106,8 +154,16 @@ def _remap_operations(body: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[
         raise AppError(ErrorCode.PLAN_INVALID, "remap plan needs exactly one db_update")
     mac_ids = [op["mac_id"] for op in ws_ops]
     from_ids = [u["from_id"] for u in db_ops[0]["updates"]]
-    if len(set(mac_ids)) != len(mac_ids) or len(set(from_ids)) != len(from_ids):
+    link_targets = [(link["from_id"], link["to_id"]) for link in db_ops[0]["folder_links"]]
+    if (
+        len(set(mac_ids)) != len(mac_ids)
+        or len(set(from_ids)) != len(from_ids)
+        or len({f for f, _ in link_targets}) != len(link_targets)
+    ):
         raise AppError(ErrorCode.PLAN_INVALID, "remap plan repeats a workspace id")
+    links = dict(link_targets)
+    if any(links.get(u["from_id"]) != u["to_id"] for u in db_ops[0]["updates"]):
+        raise AppError(ErrorCode.PLAN_INVALID, "workspace id update without matching folder link")
     return ws_ops, db_ops[0]
 
 
@@ -221,6 +277,8 @@ def apply_remap_plan(
                 str(db_op.get("adapter", "")),
                 updates,
                 bool(db_op.get("recent_paths_rewrite")),
+                _folder_links(db_op),
+                db_op["link_rewrites"],
             )
             with open_staged_writable(StagedPath(staged_global.main_db)) as conn:
                 apply_db_updates(conn, db_plan, old_prefix, new_prefix, source_os)
@@ -392,6 +450,17 @@ def verify_remap_run(run_dir: Path, dest_user: Path) -> dict[str, Any]:
                 mac_rows = _composer_rows(conn, mac_id)
                 if mac_rows != expected:
                     errors.append(f"mac id {mac_id} has {mac_rows} rows, expected {expected}")
+            links = _folder_links(db_op)
+            errors.extend(link_mismatches(conn, links))
+            try:
+                pending = rewrite_links(conn, links, write=False)
+            except ChatLinkMismatch as exc:
+                errors.append(f"cannot check agent state: {exc}")
+            else:
+                if pending.agent_state:
+                    errors.append(
+                        f"agent state still names ubuntu workspaces: {dict(pending.agent_state)}"
+                    )
     for op in ws_ops:
         mac_id = op["mac_id"]
         dest_path = op.get("dest_path")

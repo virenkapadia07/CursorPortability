@@ -177,7 +177,7 @@ def test_link_chats_verify_counts_chats_already_on_the_mac_workspace(
 
 def _handmade_body(ud: Path) -> dict[str, Any]:
     return {
-        "remap_plan_format": 1,
+        "remap_plan_format": 2,
         "target_user_data_dir": str(ud),
         "path_mapping": {"old": _OLD, "new": "/Users/u/Projects"},
         "global_db_fingerprint": {},
@@ -204,6 +204,17 @@ def _handmade_body(ud: Path) -> dict[str, Any]:
                     }
                 ],
                 "recent_paths_rewrite": False,
+                "folder_links": [
+                    {
+                        "from_id": _UBUNTU_ID,
+                        "to_id": "c" * 32,
+                        "from_path": f"{_OLD}/demo",
+                        "to_path": "/Users/u/Projects/demo",
+                        "from_uri": f"file://{_OLD}/demo",
+                        "to_uri": "file:///Users/u/Projects/demo",
+                    }
+                ],
+                "link_rewrites": {"chat_headers": 3, "chat_records": 0, "agent_state": {}},
             },
         ],
     }
@@ -225,6 +236,7 @@ def _set(path: tuple[object, ...], value: object) -> Callable[[dict[str, Any]], 
 _DELETE = object()
 _WS = ("operations", 0)
 _UPD = ("operations", 1, "updates", 0)
+_LINK = ("operations", 1, "folder_links", 0)
 
 
 @pytest.mark.parametrize(
@@ -241,6 +253,16 @@ _UPD = ("operations", 1, "updates", 0)
         _set(("operations", 1, "kind"), "sql"),
         _set(("operations",), [{"kind": "db_update", "updates": []}] * 2),
         lambda body: body["operations"].insert(1, dict(body["operations"][0])),
+        _set((*_LINK, "to_path"), "Users/u/Projects/demo"),
+        _set((*_LINK, "to_uri"), "https://example.com/demo"),
+        _set((*_LINK, "to_id"), "d" * 32),
+        _set((*_LINK, "extra"), "x"),
+        _set(("operations", 1, "folder_links"), _DELETE),
+        _set(("operations", 1, "link_rewrites", "chat_headers"), -1),
+        _set(("operations", 1, "link_rewrites", "agent_state"), {"k": "1"}),
+        lambda body: body["operations"][1]["folder_links"].append(
+            dict(body["operations"][1]["folder_links"][0])
+        ),
     ],
     ids=[
         "mac-id-traversal",
@@ -254,6 +276,14 @@ _UPD = ("operations", 1, "updates", 0)
         "unknown-kind",
         "two-db-updates",
         "repeated-mac-id",
+        "link-relative-path",
+        "link-not-file-uri",
+        "link-target-differs-from-update",
+        "link-unknown-field",
+        "links-missing",
+        "negative-link-count",
+        "agent-count-not-int",
+        "repeated-link",
     ],
 )
 def test_tampered_remap_plans_are_rejected_before_any_write(

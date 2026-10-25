@@ -17,9 +17,13 @@ from cursor_portability.planning.uri import parse_workspace_uri
 from cursor_portability.planning.workspace_id import workspace_id_for_folder
 from cursor_portability.storage.sqlite_snapshot import cold_copy_sqlite_set
 from cursor_portability.workspace.census_scan import (
+    PathHitSummary,
+    chat_link_report,
+    merge_path_hits,
     redact_path_hits,
     scan_sqlite_file,
     scan_storage_json_text,
+    storage_json_fields,
 )
 from cursor_portability.workspace.discover import collect_profile_workspaces
 
@@ -40,6 +44,7 @@ def run_workspace_census(
     source_os: str = "linux",
     dest_os: str = "darwin",
     shareable: bool = False,
+    field_report: bool = True,
 ) -> CensusReport:
     if not user_data_dir.is_dir():
         raise AppError(ErrorCode.PROFILE_NOT_FOUND, "user-data directory not found")
@@ -58,21 +63,30 @@ def run_workspace_census(
     with tempfile.TemporaryDirectory(prefix="cursor-port-census-") as tmp:
         tmp_path = Path(tmp)
         global_scan = None
+        chat_links: dict[str, Any] | None = None
         if global_db.is_file():
             staged = cold_copy_sqlite_set(global_db, tmp_path / "global")
-            global_scan = scan_sqlite_file(staged.main_db, old_prefix, source_os)
+            global_scan = scan_sqlite_file(
+                staged.main_db, old_prefix, source_os, field_report, shareable
+            )
+            if field_report:
+                chat_links = chat_link_report(
+                    staged.main_db,
+                    {r.workspace_id: (r.source_uri, r.source_path) for r in ws_results},
+                    {r.workspace_id for r in ws_results if r.status == WorkspaceMapStatus.MAPPED},
+                )
 
         storage_json_path = user_data_dir / "User" / "globalStorage" / "storage.json"
         storage_json_hits: dict[str, int] | None = None
+        storage_fields: dict[str, Any] | None = None
         if storage_json_path.is_file():
-            storage_json_hits = scan_storage_json_text(
-                storage_json_path.read_text(encoding="utf-8", errors="replace"),
-                old_prefix,
-                source_os,
-            )
+            storage_text = storage_json_path.read_text(encoding="utf-8", errors="replace")
+            storage_json_hits = scan_storage_json_text(storage_text, old_prefix, source_os)
+            storage_fields = storage_json_fields(storage_text, old_prefix, source_os)
 
         workspace_rows: list[dict[str, Any]] = []
         workspace_db_patterns: dict[str, list[str]] = {}
+        workspace_db_hits: list[tuple[PathHitSummary, ...]] = []
         any_workspace_chat_keys = False
 
         composer_by_ws = global_scan.composer_workspace_counts if global_scan else {}
@@ -92,7 +106,10 @@ def run_workspace_census(
             ws_chat = False
             if ws_db.is_file():
                 staged_ws = cold_copy_sqlite_set(ws_db, tmp_path / f"ws-{r.workspace_id}")
-                ws_scan = scan_sqlite_file(staged_ws.main_db, old_prefix, source_os)
+                ws_scan = scan_sqlite_file(
+                    staged_ws.main_db, old_prefix, source_os, field_report, shareable
+                )
+                workspace_db_hits.append(ws_scan.path_hits)
                 ws_key_shapes = list(ws_scan.item_key_shapes)
                 ws_chat = ws_scan.chat_like_keys_present
                 any_workspace_chat_keys = any_workspace_chat_keys or ws_chat
@@ -103,7 +120,7 @@ def run_workspace_census(
                 "uri_kind": parsed.kind.value,
                 "status": r.status.value,
                 "composer_header_rows": composer_by_ws.get(r.workspace_id, 0),
-                "mac_workspace_id": mac_id,
+                "mac_workspace_id": _short_id(mac_id) if shareable and mac_id else mac_id,
                 "mac_workspace_folder_exists": mac_id_exists,
             }
             if shareable:
@@ -117,14 +134,20 @@ def run_workspace_census(
                 row["detail"] = r.detail
             workspace_rows.append(row)
 
+        path_mapping = (
+            {"old": "<old prefix>", "new": "<new prefix>"}
+            if shareable
+            else {"old": mappings[0].old_path, "new": mappings[0].new_path}
+        )
         body: dict[str, Any] = {
-            "census_format": 1,
+            "census_format": 3,
             "source_os": source_os,
             "dest_os": dest_os,
-            "path_mapping": {"old": mappings[0].old_path, "new": mappings[0].new_path},
+            "path_mapping": path_mapping,
             "workspaces": workspace_rows,
             "link_chats_eligible": not any_workspace_chat_keys,
             "workspace_db_key_shapes": workspace_db_patterns if shareable else {},
+            "workspace_databases": {"path_hits": merge_path_hits(workspace_db_hits)},
         }
         if global_scan:
             body["global_database"] = {
@@ -137,8 +160,11 @@ def run_workspace_census(
                 "path_hits": redact_path_hits(global_scan.path_hits),
                 "item_key_shapes": list(global_scan.item_key_shapes),
             }
+        if chat_links is not None:
+            body["chat_links"] = chat_links
         if storage_json_hits is not None:
             body["storage_json_hits"] = storage_json_hits
+            body["storage_json_fields"] = storage_fields
 
         if not shareable:
             body["workspaces_full_count"] = len(workspace_rows)

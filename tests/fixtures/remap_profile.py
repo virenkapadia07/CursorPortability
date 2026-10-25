@@ -1,10 +1,100 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from tests.fixtures.db import COMPOSER_HEADERS_INDEX_SQL, COMPOSER_HEADERS_SQL, KV_TABLE_SQL
+
+OTHER_WORKSPACE_ID = "f" * 32
+OTHER_FOLDER = "/home/u/Projects/other"
+AGENT_TAB_KEY = "cursor/workspaceTabs.v1"
+
+
+def workspace_ref(workspace_id: str, folder: str) -> dict[str, Any]:
+    """`{id, uri}` workspace reference as chat headers store it."""
+    return {
+        "id": workspace_id,
+        "uri": {
+            "$mid": 1,
+            "fsPath": folder,
+            "external": f"file://{folder}",
+            "path": folder,
+            "scheme": "file",
+        },
+    }
+
+
+def linked_chat_header(workspace_id: str, folder: str) -> dict[str, Any]:
+    return {
+        "workspaceIdentifier": workspace_ref(workspace_id, folder),
+        "agentLocation": {"environment": workspace_ref(workspace_id, folder)},
+        "agentLocationHistory": [
+            {"location": {"environment": workspace_ref(workspace_id, folder)}}
+        ],
+        "trackedGitRepos": [{"repoPath": folder}, {"repoPath": OTHER_FOLDER}],
+        "draftTarget": {"environment": workspace_ref(OTHER_WORKSPACE_ID, OTHER_FOLDER)},
+        "subtitle": f"edited {folder}/app.py — café",
+    }
+
+
+def linked_chat_record(workspace_id: str, folder: str) -> dict[str, Any]:
+    return {
+        "workspaceIdentifier": workspace_ref(workspace_id, folder),
+        "trackedGitRepos": [{"repoPath": f"{folder}/vendor/lib"}],
+        "fullConversationHeadersOnly": [{"grouping": {"toolDisplayPath": folder}}],
+        "text": f"look at {folder}",
+    }
+
+
+def add_linked_chats(path: Path, workspace_id: str, folder: str, composer_ids: list[str]) -> None:
+    """Chat headers and chat records that repeat their workspace id and folder."""
+    conn = sqlite3.connect(path)
+    for composer_id in composer_ids:
+        conn.execute(
+            "INSERT INTO composerHeaders (composerId, workspaceId, value) VALUES (?, ?, ?)",
+            (composer_id, workspace_id, json.dumps(linked_chat_header(workspace_id, folder))),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)",
+            (
+                f"composerData:{composer_id}",
+                json.dumps(linked_chat_record(workspace_id, folder)).encode(),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
+def add_agent_state(path: Path, workspace_id: str, folder: str) -> None:
+    """Agents-window project lists naming an Ubuntu folder, plus one unrelated key."""
+    uri = f"file://{folder}"
+    rows = {
+        "glass.localAgentProjects.v1": [{"workspace": workspace_ref(workspace_id, folder)}],
+        "workspaceMetadata.entries": {
+            "entries": [
+                {
+                    "folderUri": uri,
+                    "displayPath": folder,
+                    "paths": [{"uri": workspace_ref(workspace_id, folder)["uri"]}],
+                    "trackedGitRepos": [{"repoPath": folder}],
+                    "label": f"notes about {folder}",
+                }
+            ]
+        },
+        "repositoryTracker.paths": {"repo-1": {"localPath": uri}},
+        AGENT_TAB_KEY: {"workspaceTabs": [{"props": {"repoPath": folder}}]},
+        "terminal.history.entries.dirs": {"entries": [{"key": folder}]},
+    }
+    conn = sqlite3.connect(path)
+    for key, value in rows.items():
+        conn.execute(
+            "INSERT INTO ItemTable (key, value) VALUES (?, ?)", (key, json.dumps(value).encode())
+        )
+    conn.commit()
+    conn.close()
 
 
 def build_ubuntu_workspace_profile(

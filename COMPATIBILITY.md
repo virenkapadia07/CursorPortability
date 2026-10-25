@@ -19,12 +19,13 @@
 | `workspaces census` on cold copies (workspace mapping, path-hit census, composer row counts) | E2E read-only test |
 | macOS workspace folder ID `md5(path + birthtime_ms)` | Verified on this Mac; unit test |
 | In-profile `workspaces remap` (`workspace_copy` + `composerHeaders.workspaceId`, optional recent-paths key) | E2E on synthetic Ubuntu-layout fixture (macOS) |
+| Remap link rewrites (chat `workspaceIdentifier` / `agentLocation` / `trackedGitRepos`, Agents-window state) | Field names from one real profile's census; unit + E2E on fixtures built from those names. Whether Cursor then lists the chats under the Mac project is UNVERIFIED until a rehearsal on a clone |
 
 ## Inferred (not verified on live Cursor)
 
 | Item | Tag |
 |------|-----|
-| Meaning of `composerHeaders` / `cursorDiskKV` rows | UNVERIFIED (copied as-is; not interpreted) |
+| Meaning of `composerHeaders` / `cursorDiskKV` rows | UNVERIFIED (copied as-is; only the remap link fields above are interpreted) |
 | `composerHeaders` layout on other Cursor versions / OSes | UNVERIFIED (any column change fails closed) |
 | Linux / Windows default paths | COMMUNITY + layout simulation |
 | Store stack (`~/.cursor/chats`) | INVENTORY_ONLY in backup |

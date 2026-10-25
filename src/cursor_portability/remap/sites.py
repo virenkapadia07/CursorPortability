@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import Any
 
+from cursor_portability.remap.json_links import FolderLink, rewrite_links
 from cursor_portability.schemas.adapters.cursor_composer_headers import COMPOSER_HEADERS_TABLE
 from cursor_portability.workspace.path_needles import prefix_needle_variants
 
@@ -22,6 +24,8 @@ class DbUpdatePlan:
     adapter_label: str
     workspace_id_updates: tuple[WorkspaceIdUpdate, ...]
     recent_paths_rewrite: bool
+    folder_links: tuple[FolderLink, ...] = ()
+    expected_link_rewrites: dict[str, Any] | None = None
 
 
 def plan_db_updates(
@@ -47,6 +51,10 @@ def apply_db_updates(
     new_prefix: str,
     source_os: str,
 ) -> None:
+    if plan.folder_links:
+        done = rewrite_links(conn, plan.folder_links, write=True).as_dict()
+        if done != plan.expected_link_rewrites:
+            raise ValueError(f"link rewrites {done} != plan {plan.expected_link_rewrites}")
     for upd in plan.workspace_id_updates:
         cur = conn.execute(
             f'UPDATE "{COMPOSER_HEADERS_TABLE}" SET workspaceId = ? WHERE workspaceId = ?',

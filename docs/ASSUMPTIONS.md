@@ -56,6 +56,10 @@ Evidence tags: **OBSERVED**, **COMMUNITY**, **UPSTREAM**, **UNVERIFIED**.
 | 31 | `history.recentlyOpenedPathsList` in `ItemTable` may hold folder URIs to rewrite | CENSUS_GATED |
 | 31a | Linux workspace IDs are salted with the folder inode, so a re-cloned project leaves several Ubuntu workspaces for one path; the most recently modified `state.vscdb` / `-wal` / `workspace.json` marks the one Cursor used last (only meaningful if the profile copy kept mtimes) | UPSTREAM_INFERRED |
 | 31b | Folder and multi-root workspace folder names are 32-character lowercase md5 hex; anything else (empty-window or remote) is not remapped | UPSTREAM_INFERRED |
+| 31c | Every chat header's `workspaceIdentifier.id` equals its `composerHeaders.workspaceId`, and for folder workspaces `workspaceIdentifier.uri` (`path`, `fsPath`, `external`) equals the `workspace.json` folder; chat records `composerData:<composerId>` repeat the same pair when they have one | OBSERVED: every chat in one real profile's census (`chat_links`) |
+| 31d | `agentLocation.environment` / `agentLocationHistory[].location.environment` are `{id, uri}` workspace references of the same form | OBSERVED: same census |
+| 31e | Cursor reads a chat's workspace from these fields as well as (or instead of) the column, so all must agree after a remap | UNVERIFIED until the rehearsal: open Cursor on a remapped clone |
+| 31f | Agents-window state (`glass.localAgentProjects.v1`, `workspaceMetadata.entries`, `repositoryTracker.paths`, `cursor<path>` keys) names workspaces only by folder path/URI or workspace ID string values | OBSERVED for paths (census `fields`); workspace-ID values UNVERIFIED |
 
 ## Phase 3+
 
@@ -63,6 +67,9 @@ Evidence tags: **OBSERVED**, **COMMUNITY**, **UPSTREAM**, **UNVERIFIED**.
 |---|------------|
 | 32–33 | Cursor accepts scrubbed/vacuumed DBs; re-login after scrub |
 
-The only Cursor-specific names hard-coded are the `composerHeaders` table and its columns in
-`cursor_composer_headers@1`–`@3`, taken from a real profile's `sqlite_master`. No Cursor key
-names are hard-coded. Any deviation from a pinned layout fails closed.
+Cursor-specific names hard-coded: the `composerHeaders` table and its columns in
+`cursor_composer_headers@1`–`@3`, taken from a real profile's `sqlite_master`; and, for the
+Phase 3 link rewrites only, the `composerData:` key prefix, the Agents-window key names and
+shapes above, and the JSON field names in 31c–31d, all taken from a real profile's census.
+Any deviation from a pinned layout, or a chat reference that does not match its workspace,
+fails closed.

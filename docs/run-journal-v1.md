@@ -29,3 +29,13 @@ Before creating a run, apply refuses symlinked destination files. It reports `al
 `migrate verify --run-id ID` checks destination files against the plan's `post_sha256` hashes.
 
 `migrate rollback --run-id ID` checks every target before restoring any of them. It refuses when a destination file no longer matches its post-apply hash, or when the snapshot of a file that existed before apply is missing. Restores are verified the same way as the automatic restore. A failed restore raises `RUN_INCOMPLETE` and journals `rollback_incomplete`.
+
+## Workspace remap runs (Phase 3)
+
+Journal events include `remap_started`, `publish_global_begin`, `publish_global_done`, `workspace_copy_done`, `remap_completed`, `remap_failed`.
+
+`workspaces remap verify` uses semantic checks on a cold copy of the global DB (integrity, no rows left under Ubuntu IDs, `existing_rows + expected_rows` under each Mac ID, `workspace.json` URI, recomputed Mac workspace ID).
+
+If apply fails, only the targets it had started to publish are restored from the snapshot, inside the same write allowlist (global DB set plus the plan's Mac workspace folders).
+
+`workspaces remap rollback` restores the global DB set and workspace folders from the snapshot when the live global DB still matches `global_db_fingerprint_post` in `report.json`.

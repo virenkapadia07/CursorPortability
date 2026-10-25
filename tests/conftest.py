@@ -50,6 +50,10 @@ def cursor_not_running(monkeypatch: pytest.MonkeyPatch) -> None:
         "cursor_portability.migration.engine.probe_cursor_running",
         not_running,
     )
+    monkeypatch.setattr(
+        "cursor_portability.migration.remap_engine.probe_cursor_running",
+        not_running,
+    )
 
 
 @pytest.fixture

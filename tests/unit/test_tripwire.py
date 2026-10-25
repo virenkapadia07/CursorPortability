@@ -1,5 +1,6 @@
 import os
 import shutil
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
@@ -57,6 +58,35 @@ def test_reads_and_outside_writes_are_allowed(profile: Path, tmp_path: Path) -> 
     assert os.listdir(profile / "User") == ["settings.json"]
     shutil.copy2(profile / "User/settings.json", tmp_path / "copy.json")
     (tmp_path / "copy.json").write_text("changed", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "form",
+    ["plain", "uri", "uri_authority", "uri_localhost", "uri_percent"],
+)
+def test_sqlite_opens_of_protected_paths_are_blocked(profile: Path, form: str) -> None:
+    db = profile / "User" / "state db.vscdb"
+    sqlite3.connect(db).close()
+    posix = db.as_posix()
+    database = {
+        "plain": str(db),
+        "uri": f"file:{posix}?mode=ro&immutable=1",
+        "uri_authority": f"file://{posix}?mode=ro",
+        "uri_localhost": f"file://localhost{posix}",
+        "uri_percent": f"file:{posix.replace(' ', '%20')}?mode=ro",
+    }[form]
+    install_tripwire((profile,))
+    with pytest.raises(RuntimeError, match="sqlite3.connect"):
+        sqlite3.connect(database, uri=form != "plain")
+
+
+def test_sqlite_opens_outside_protected_roots_are_allowed(profile: Path, tmp_path: Path) -> None:
+    install_tripwire((profile,))
+    sqlite3.connect(":memory:").close()
+    sqlite3.connect("file::memory:", uri=True).close()
+    staged = tmp_path / "staged.vscdb"
+    sqlite3.connect(f"file:{staged.as_posix()}?mode=rwc", uri=True).close()
+    assert staged.is_file()
 
 
 def test_detect_mode_blocks_reads(profile: Path) -> None:

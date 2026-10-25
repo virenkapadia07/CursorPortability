@@ -1,14 +1,15 @@
-# Architecture (Phase 0–2)
+# Architecture (Phase 0–3)
 
 Layered design: CLI → services → planning / migration / discovery / schemas / bundle → platform / storage → security.
 
 ```
 CLI / reporting
       |
-services (doctor, detect, inspect, backup, plan, migrate, …)
+services (doctor, detect, inspect, backup, plan, migrate, census, …)
       |
 +----------+-----------+----------+-----------+
 | planning | migration | discovery| schemas   |
+| workspace| remap     |          |           |
 +----------+-----------+----------+-----------+
 | bundle   |
 +----------+
@@ -20,9 +21,11 @@ security (tripwire, scrub, redaction, archive validation)
 
 ## Package layout
 
-`src/cursor_portability/` contains `cli/`, `platform/`, `discovery/`, `schemas/`, `storage/`, `bundle/`, `security/`, `services/`, `planning/`, `migration/`, `reporting/`, `models/`, `errors.py`.
+`src/cursor_portability/` contains `cli/`, `platform/`, `discovery/`, `schemas/`, `storage/`, `bundle/`, `security/`, `services/`, `planning/`, `migration/`, `workspace/`, `remap/`, `reporting/`, `models/`, `errors.py`.
 
-Phase 2 adds read-only `plan create` and journaled `migrate apply` for settings, keybindings, and snippets only. SQLite profile data is not written until Phase 3.
+Phase 2: read-only `plan create` and journaled `migrate apply` for settings, keybindings, and snippets.
+
+Phase 3: read-only `workspaces census`, in-profile `workspaces remap` (workspace folder copy + `composerHeaders.workspaceId` updates on a staged global DB, then atomic publish). Live DBs are never opened for write; only cold copies are edited.
 
 ## Import rules
 

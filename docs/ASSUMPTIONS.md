@@ -47,11 +47,21 @@ Evidence tags: **OBSERVED**, **COMMUNITY**, **UPSTREAM**, **UNVERIFIED**.
 | 27 | `workspace.json` `folder` URIs use VS Code-style `file://` encoding | UPSTREAM_INFERRED |
 | 28 | `extensions.json` list shape matches VS Code marketplace identifiers | UPSTREAM_INFERRED |
 
+## Phase 3 (workspace remap)
+
+| # | Assumption | Tag |
+|---|------------|-----|
+| 29 | macOS `workspaceStorage` folder name is `md5(absolute_folder_path + birthtime_ms)` | VERIFIED (this Mac) |
+| 30 | `composerHeaders.workspaceId` matches `workspaceStorage` folder names | CENSUS_GATED |
+| 31 | `history.recentlyOpenedPathsList` in `ItemTable` may hold folder URIs to rewrite | CENSUS_GATED |
+| 31a | Linux workspace IDs are salted with the folder inode, so a re-cloned project leaves several Ubuntu workspaces for one path; the most recently modified `state.vscdb` / `-wal` / `workspace.json` marks the one Cursor used last (only meaningful if the profile copy kept mtimes) | UPSTREAM_INFERRED |
+| 31b | Folder and multi-root workspace folder names are 32-character lowercase md5 hex; anything else (empty-window or remote) is not remapped | UPSTREAM_INFERRED |
+
 ## Phase 3+
 
 | # | Assumption |
 |---|------------|
-| 29–30 | Cursor accepts scrubbed/vacuumed DBs; re-login after scrub |
+| 32–33 | Cursor accepts scrubbed/vacuumed DBs; re-login after scrub |
 
 The only Cursor-specific names hard-coded are the `composerHeaders` table and its columns in
 `cursor_composer_headers@1`–`@3`, taken from a real profile's `sqlite_master`. No Cursor key

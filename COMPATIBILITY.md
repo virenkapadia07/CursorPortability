@@ -1,4 +1,4 @@
-# Compatibility matrix (Phase 0–2)
+# Compatibility matrix (Phase 0–3)
 
 ## Confirmed (automated tests)
 
@@ -16,6 +16,9 @@
 | Key-level settings / keybindings / snippets merge with JSONC comment preservation | Unit + E2E tests |
 | `migrate apply` with snapshot, journal, verify, and rollback (allowlisted profile files only) | E2E tests on synthetic profiles, including fault injection at every apply step |
 | Write guard (audit-hook tripwire) on Cursor profile roots, with a per-apply window for planned files only | Unit + E2E tests |
+| `workspaces census` on cold copies (workspace mapping, path-hit census, composer row counts) | E2E read-only test |
+| macOS workspace folder ID `md5(path + birthtime_ms)` | Verified on this Mac; unit test |
+| In-profile `workspaces remap` (`workspace_copy` + `composerHeaders.workspaceId`, optional recent-paths key) | E2E on synthetic Ubuntu-layout fixture (macOS) |
 
 ## Inferred (not verified on live Cursor)
 
@@ -26,11 +29,12 @@
 | Linux / Windows default paths | COMMUNITY + layout simulation |
 | Store stack (`~/.cursor/chats`) | INVENTORY_ONLY in backup |
 
-## Unsupported (Phase 0–2)
+## Unsupported / partial (Phase 3)
 
-- Conversation session migration (SQLite / workspace DB writes)
+- Rewriting Ubuntu paths inside chat message bodies or attachments
+- Per-editor UI state that references old file paths
 - Extension install (IDs listed in run folder only)
-- Cross-workspace path remapping applied to databases (URI mapping is plan inventory only)
+- Workspace ID formula on Linux or Windows as migration destination
 - `conversation-search.db` mutation or inclusion by default
 - Encrypted bundles
 - Cloud / Background Agent history

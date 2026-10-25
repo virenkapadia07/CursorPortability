@@ -138,6 +138,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "migrate":
         return _migrate_dispatch(args, env)
 
+    if args.command == "workspaces":
+        return _workspaces_dispatch(args, env)
+
     return ExitCode.USAGE
 
 
@@ -250,6 +253,114 @@ def _plan_dispatch(args: argparse.Namespace, env: Environment) -> int:
             emit_text(f"Plan {data['plan_id']}")
             ops = body_obj.get("operations", [])
             emit_text(f"Operations: {len(ops) if isinstance(ops, list) else 0}")
+        return ExitCode.PASS
+    return ExitCode.USAGE
+
+
+def _located_user_data_dir(env: Environment, target_profile: str | None) -> Path:
+    from cursor_portability.discovery.locate import locate_profiles
+
+    paths = get_platform_paths(env)
+    profiles = locate_profiles(paths, Path(target_profile) if target_profile else None)
+    if not profiles:
+        raise AppError(ErrorCode.PROFILE_NOT_FOUND, "profile not found")
+    return profiles[0].user_data_dir
+
+
+def _workspaces_dispatch(args: argparse.Namespace, env: Environment) -> int:
+    from cursor_portability.migration.remap_engine import (
+        apply_remap_plan,
+        rollback_remap_run,
+        verify_remap_run,
+    )
+    from cursor_portability.planning.remap import (
+        create_remap_plan,
+        parse_remap_plan,
+        show_remap_plan,
+    )
+    from cursor_portability.services.census import run_workspace_census
+
+    if args.workspaces_cmd == "census":
+        report = run_workspace_census(
+            _located_user_data_dir(env, args.target_profile),
+            args.from_prefix,
+            args.to_prefix,
+            source_os=args.source_os or "linux",
+            dest_os=args.dest_os or "darwin",
+            shareable=args.shareable,
+        )
+        if args.json:
+            emit_json(report.body)
+        else:
+            emit_text(f"Workspaces: {len(report.body.get('workspaces', []))}")
+            emit_text(f"Link-chats eligible: {report.body.get('link_chats_eligible')}")
+        return ExitCode.PASS
+
+    if args.remap_cmd == "plan":
+        plan_report = create_remap_plan(
+            _located_user_data_dir(env, args.target_profile),
+            args.from_prefix,
+            args.to_prefix,
+            Path(args.output),
+            set(args.replace or []),
+            set(args.link_chats or []),
+            source_os=args.source_os or "linux",
+            dest_os=args.dest_os or "darwin",
+            skip_duplicates=args.skip_duplicates,
+        )
+        if args.json:
+            emit_json(plan_report.__dict__)
+        else:
+            emit_text(f"Remap plan: {plan_report.plan_path} ({plan_report.plan_id})")
+        return ExitCode.PASS
+    if args.remap_cmd == "show":
+        data = show_remap_plan(Path(args.plan), args.shareable)
+        if args.json:
+            emit_json(data)
+        else:
+            body = data["body"]
+            assert isinstance(body, dict)
+            emit_text(f"Plan {data['plan_id']}")
+            emit_text(f"Operations: {len(body.get('operations', []))}")
+        return ExitCode.PASS
+    runs_dir = Path(args.runs_dir) if args.runs_dir else env.home / ".cursor-portability" / "runs"
+    if args.remap_cmd == "apply":
+        confirmed = _yes_confirmation(args.yes, "Apply workspace remap plan?")()
+        apply_report = apply_remap_plan(Path(args.plan), runs_dir, confirmed)
+        if args.json:
+            emit_json(
+                {
+                    "run_id": apply_report.run_id,
+                    "run_dir": apply_report.run_dir,
+                    "outcome": apply_report.outcome.value,
+                    "operations": apply_report.operations,
+                }
+            )
+        else:
+            emit_text(f"Remap apply: {apply_report.outcome.value} (run {apply_report.run_id})")
+        return ExitCode.PASS
+    if not _RUN_ID_RE.fullmatch(args.run_id):
+        raise AppError(ErrorCode.PLAN_INVALID, "invalid run id", {"run_id": args.run_id})
+    run_dir = runs_dir / args.run_id
+    if not (run_dir / "plan.json").is_file():
+        raise AppError(
+            ErrorCode.RUN_INCOMPLETE, "no remap run with that id", {"run_id": args.run_id}
+        )
+    dest_user = Path(str(parse_remap_plan(run_dir / "plan.json")["target_user_data_dir"])) / "User"
+    if args.remap_cmd == "verify":
+        result = verify_remap_run(run_dir, dest_user)
+        if args.json:
+            emit_json(result)
+        else:
+            emit_text(f"Remap verify: {'PASS' if result['ok'] else 'FAIL'}")
+        return ExitCode.PASS if result["ok"] else ExitCode.FAIL
+    if args.remap_cmd == "rollback":
+        confirmed = _yes_confirmation(args.yes, "Rollback workspace remap run?")()
+        rollback_remap_run(run_dir, dest_user, confirmed)
+        if args.json:
+            emit_json({"rolled_back": args.run_id})
+        else:
+            emit_text(f"Rolled back remap run {args.run_id}")
         return ExitCode.PASS
     return ExitCode.USAGE
 
@@ -402,6 +513,45 @@ def _build_parser() -> argparse.ArgumentParser:
     mr.add_argument("--run-id", required=True)
     mr.add_argument("--yes", action="store_true")
     mr.add_argument("--runs-dir")
+    ws = sub.add_parser("workspaces", parents=[common])
+    wssub = ws.add_subparsers(dest="workspaces_cmd", required=True)
+    wc = wssub.add_parser("census", parents=[common])
+    wc.add_argument("--from", dest="from_prefix", required=True)
+    wc.add_argument("--to", dest="to_prefix", required=True)
+    wc.add_argument("--target-profile")
+    wc.add_argument("--source-os")
+    wc.add_argument("--dest-os")
+    wc.add_argument("--shareable", action="store_true")
+    wr = wssub.add_parser("remap", parents=[common])
+    wrsub = wr.add_subparsers(dest="remap_cmd", required=True)
+    wrp = wrsub.add_parser("plan", parents=[common])
+    wrp.add_argument("--from", dest="from_prefix", required=True)
+    wrp.add_argument("--to", dest="to_prefix", required=True)
+    wrp.add_argument("--output", required=True)
+    wrp.add_argument("--target-profile")
+    wrp.add_argument("--source-os")
+    wrp.add_argument("--dest-os")
+    wrp.add_argument("--replace", action="append")
+    wrp.add_argument("--link-chats", action="append")
+    wrp.add_argument(
+        "--skip-duplicates",
+        action="store_true",
+        help="skip projects that several Ubuntu workspaces map to instead of merging them",
+    )
+    wrs = wrsub.add_parser("show", parents=[common])
+    wrs.add_argument("plan")
+    wrs.add_argument("--shareable", action="store_true")
+    wra = wrsub.add_parser("apply", parents=[common])
+    wra.add_argument("plan")
+    wra.add_argument("--yes", action="store_true")
+    wra.add_argument("--runs-dir")
+    wrv = wrsub.add_parser("verify", parents=[common])
+    wrv.add_argument("--run-id", required=True)
+    wrv.add_argument("--runs-dir")
+    wrr = wrsub.add_parser("rollback", parents=[common])
+    wrr.add_argument("--run-id", required=True)
+    wrr.add_argument("--yes", action="store_true")
+    wrr.add_argument("--runs-dir")
     return p
 
 

@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 TripwireMode = Literal["off", "normal", "detect_only"]
 
@@ -86,11 +87,31 @@ def _write_allowed(path_str: str, event: str) -> bool:
     for target in allowed:
         if entry == target:
             return True
+        try:
+            entry.relative_to(target)
+            return True
+        except ValueError:
+            pass
         if entry.parent == target.parent and entry.name.startswith(f"{target.name}.partial-"):
             return True
         if event == "os.mkdir" and entry in target.parents:
             return True
     return False
+
+
+def _sqlite_candidate_paths(database: str) -> list[str]:
+    """Paths ``sqlite3.connect`` may open; the audit event does not say whether ``uri=True``."""
+    if database in ("", ":memory:"):
+        return []
+    paths = [database]
+    if database.startswith("file:"):
+        rest = database[len("file:") :].split("#", 1)[0].split("?", 1)[0]
+        if rest.startswith("//"):
+            rest = "/" + rest[2:].partition("/")[2]
+        decoded = unquote(rest)
+        if decoded and decoded != ":memory:":
+            paths.append(decoded)
+    return paths
 
 
 def _check_write(path_str: str, event: str, protected: tuple[Path, ...]) -> None:
@@ -134,7 +155,9 @@ def _audit_hook(event: str, args: tuple[object, ...]) -> None:
 
     if event == "sqlite3.connect" and args:
         path_str = _as_path_str(args[0])
-        if path_str is not None and _path_under_protected(path_str, protected):
+        if path_str is not None and any(
+            _path_under_protected(p, protected) for p in _sqlite_candidate_paths(path_str)
+        ):
             raise RuntimeError("tripwire: sqlite3.connect on protected path blocked")
 
 

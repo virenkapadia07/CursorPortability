@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cursor-portability"
+version = "0.1.0"
+description = "Safe backup and discovery toolkit for local Cursor IDE profiles"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "CursorPortability contributors" }]
+dependencies = []
+
+[project.scripts]
+cursor-port = "cursor_portability.cli.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "coverage>=7.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501", "E741", "B904", "SIM102", "SIM105", "SIM110", "SIM112", "F841"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["cursor_portability"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: large or long-running tests",
+]
+
+[tool.coverage.run]
+source = ["cursor_portability"]
+branch = true

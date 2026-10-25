@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class ProcessState(StrEnum):
+    RUNNING = "RUNNING"
+    NOT_RUNNING = "NOT_RUNNING"
+    UNKNOWN = "UNKNOWN"
+
+
+class DetectionStatus(StrEnum):
+    PASS = "PASS"
+    PARTIAL = "PARTIAL"
+    UNKNOWN = "UNKNOWN"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class EvidenceLevel(StrEnum):
+    SYNTHETIC_ONLY = "SYNTHETIC_ONLY"
+    UPSTREAM_INFERRED = "UPSTREAM_INFERRED"
+    COMMUNITY_REPORTED = "COMMUNITY_REPORTED"
+    REAL_SKELETON_VERIFIED = "REAL_SKELETON_VERIFIED"
+
+
+class DataCategory(StrEnum):
+    USER_SETTINGS = "USER_SETTINGS"
+    KEYBINDINGS = "KEYBINDINGS"
+    SNIPPETS = "SNIPPETS"
+    EXTENSIONS_LIST = "EXTENSIONS_LIST"
+    USER_RULES = "USER_RULES"
+    MCP_CONFIG = "MCP_CONFIG"
+    COMPOSER_DB = "COMPOSER_DB"
+    STORE_DB = "STORE_DB"
+    WORKSPACE_METADATA = "WORKSPACE_METADATA"
+    CACHE = "CACHE"
+    LOGS = "LOGS"
+    AUTH_MATERIAL = "AUTH_MATERIAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class CategoryAction(StrEnum):
+    INCLUDE = "INCLUDE"
+    EXCLUDE = "EXCLUDE"
+    OPT_IN = "OPT_IN"
+    INVENTORY_ONLY = "INVENTORY_ONLY"
+
+
+class ValidationOutcome(StrEnum):
+    PASS = "PASS"
+    PARTIAL = "PARTIAL"
+    FAIL = "FAIL"
+    UNKNOWN = "UNKNOWN"

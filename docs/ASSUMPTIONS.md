@@ -39,11 +39,19 @@ Evidence tags: **OBSERVED**, **COMMUNITY**, **UPSTREAM**, **UNVERIFIED**.
 |---|------------|
 | 23–25 | Cold copy + VACUUM INTO + SQLite capabilities on each platform |
 
-## Phase 2+
+## Phase 2 (config migration)
+
+| # | Assumption | Tag |
+|---|------------|-----|
+| 26 | `settings.json` / `keybindings.json` accept JSONC (comments, trailing commas) | UPSTREAM_INFERRED |
+| 27 | `workspace.json` `folder` URIs use VS Code-style `file://` encoding | UPSTREAM_INFERRED |
+| 28 | `extensions.json` list shape matches VS Code marketplace identifiers | UPSTREAM_INFERRED |
+
+## Phase 3+
 
 | # | Assumption |
 |---|------------|
-| 26–27 | Cursor accepts scrubbed/vacuumed DBs; re-login after scrub |
+| 29–30 | Cursor accepts scrubbed/vacuumed DBs; re-login after scrub |
 
 The only Cursor-specific names hard-coded are the `composerHeaders` table and its columns in
 `cursor_composer_headers@1`–`@3`, taken from a real profile's `sqlite_master`. No Cursor key

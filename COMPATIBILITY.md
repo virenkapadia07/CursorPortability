@@ -1,4 +1,4 @@
-# Compatibility matrix (Phase 0–1)
+# Compatibility matrix (Phase 0–2)
 
 ## Confirmed (automated tests)
 
@@ -11,6 +11,11 @@
 | Backup create / verify / restore to new directory | E2E tests |
 | Credential key-name scrub + bundle canary scan | E2E tests |
 | Archive path traversal rejection | Unit tests |
+| Cross-OS `file://` workspace URI parse and path-map (longest-prefix, collision detection) | Unit tests |
+| Deterministic content-addressed migration plan (`plan create` / `plan show`) | E2E tests |
+| Key-level settings / keybindings / snippets merge with JSONC comment preservation | Unit + E2E tests |
+| `migrate apply` with snapshot, journal, verify, and rollback (allowlisted profile files only) | E2E tests on synthetic profiles, including fault injection at every apply step |
+| Write guard (audit-hook tripwire) on Cursor profile roots, with a per-apply window for planned files only | Unit + E2E tests |
 
 ## Inferred (not verified on live Cursor)
 
@@ -21,11 +26,11 @@
 | Linux / Windows default paths | COMMUNITY + layout simulation |
 | Store stack (`~/.cursor/chats`) | INVENTORY_ONLY in backup |
 
-## Unsupported (Phase 0–1)
+## Unsupported (Phase 0–2)
 
-- Live profile restore / migration apply
-- Conversation session migration
-- Cross-workspace path remapping
+- Conversation session migration (SQLite / workspace DB writes)
+- Extension install (IDs listed in run folder only)
+- Cross-workspace path remapping applied to databases (URI mapping is plan inventory only)
 - `conversation-search.db` mutation or inclusion by default
 - Encrypted bundles
 - Cloud / Background Agent history

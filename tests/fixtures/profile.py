@@ -25,7 +25,9 @@ def build_synthetic_profile(home: Path, platform: str) -> Path:
     ud = user_data_dir_for(home, platform)
     user = ud / "User"
     (user / "snippets").mkdir(parents=True)
-    (user / "settings.json").write_text('{"editor.fontSize": 14}', encoding="utf-8")
+    (user / "settings.json").write_text(
+        '{"editor.fontSize": 14, "hello.key": "world"}', encoding="utf-8"
+    )
     make_composer_headers_db(
         user / "globalStorage" / "state.vscdb",
         item_rows=[("hello.key", b"world"), ("auth.token", CANARY)],

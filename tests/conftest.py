@@ -37,9 +37,18 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def cursor_not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    not_running = lambda _ud: ProcessState.NOT_RUNNING  # noqa: E731
     monkeypatch.setattr(
         "cursor_portability.services.backup.probe_cursor_running",
-        lambda _ud: ProcessState.NOT_RUNNING,
+        not_running,
+    )
+    monkeypatch.setattr(
+        "cursor_portability.platform.process_probe.probe_cursor_running",
+        not_running,
+    )
+    monkeypatch.setattr(
+        "cursor_portability.migration.engine.probe_cursor_running",
+        not_running,
     )
 
 

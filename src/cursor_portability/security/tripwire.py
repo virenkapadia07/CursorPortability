@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sys
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +16,43 @@ _state: dict[str, object] = {
     "mode": "off",
     "protected": (),
     "hook": None,
+    "write_allowed": frozenset(),
 }
+
+_WRITE_OPEN_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+# Audit event -> (indexes of path arguments that get modified, indexes of dir_fd arguments).
+# Argument order follows CPython's PySys_Audit calls for each event.
+_WRITE_EVENTS: dict[str, tuple[tuple[int, ...], tuple[int, ...]]] = {
+    "os.rename": ((0, 1), (2, 3)),
+    "os.remove": ((0,), (1,)),
+    "os.rmdir": ((0,), (1,)),
+    "os.mkdir": ((0,), (2,)),
+    "os.chmod": ((0,), (2,)),
+    "os.chown": ((0,), (3,)),
+    "os.utime": ((0,), (3,)),
+    "os.symlink": ((1,), (2,)),
+    "os.link": ((1,), (2, 3)),
+    "os.truncate": ((0,), ()),
+    "os.chflags": ((0,), ()),
+    "os.lchflags": ((0,), ()),
+    "os.setxattr": ((0,), ()),
+    "os.removexattr": ((0,), ()),
+    "shutil.copyfile": ((1,), ()),
+    "shutil.copytree": ((1,), ()),
+    "shutil.move": ((0, 1), ()),
+    "shutil.rmtree": ((0,), ()),
+}
+
+
+def _as_path_str(arg: object) -> str | None:
+    if isinstance(arg, os.PathLike):
+        arg = os.fspath(arg)
+    if isinstance(arg, bytes):
+        return os.fsdecode(arg)
+    if isinstance(arg, str):
+        return arg
+    return None
 
 
 def _path_under_protected(path_str: str, protected: tuple[Path, ...]) -> bool:
@@ -30,6 +69,35 @@ def _path_under_protected(path_str: str, protected: tuple[Path, ...]) -> bool:
     return False
 
 
+def _entry_path(path: Path) -> Path:
+    """Resolve the parent only, so a symlink at the final component is not followed."""
+    path = path.expanduser()
+    return path.parent.resolve() / path.name
+
+
+def _write_allowed(path_str: str, event: str) -> bool:
+    allowed = _state["write_allowed"]
+    if not isinstance(allowed, frozenset) or not allowed:
+        return False
+    try:
+        entry = _entry_path(Path(path_str))
+    except (OSError, ValueError):
+        return False
+    for target in allowed:
+        if entry == target:
+            return True
+        if entry.parent == target.parent and entry.name.startswith(f"{target.name}.partial-"):
+            return True
+        if event == "os.mkdir" and entry in target.parents:
+            return True
+    return False
+
+
+def _check_write(path_str: str, event: str, protected: tuple[Path, ...]) -> None:
+    if _path_under_protected(path_str, protected) and not _write_allowed(path_str, event):
+        raise RuntimeError(f"tripwire: {event} on protected path blocked")
+
+
 def _audit_hook(event: str, args: tuple[object, ...]) -> None:
     if not _state["enabled"]:
         return
@@ -42,24 +110,32 @@ def _audit_hook(event: str, args: tuple[object, ...]) -> None:
         raise RuntimeError("tripwire: network connect blocked")
 
     if event == "open" and args:
-        path_arg = args[0]
-        if isinstance(path_arg, (str, bytes)):
-            path_str = path_arg.decode() if isinstance(path_arg, bytes) else path_arg
-            if _path_under_protected(path_str, protected):
-                if mode == "detect_only":
-                    raise RuntimeError("tripwire: open on protected path blocked in detect mode")
-                flags = args[1] if len(args) > 1 else 0
-                if isinstance(flags, int) and (flags & 0x3) != 0:  # O_RDONLY=0
-                    raise RuntimeError("tripwire: write open on protected path blocked")
+        path_str = _as_path_str(args[0])
+        if path_str is None or not _path_under_protected(path_str, protected):
+            return
+        if mode == "detect_only":
+            raise RuntimeError("tripwire: open on protected path blocked in detect mode")
+        flags = args[2] if len(args) > 2 else 0
+        if isinstance(flags, int) and flags & _WRITE_OPEN_FLAGS:
+            _check_write(path_str, "write open", protected)
+        return
+
+    if event in _WRITE_EVENTS:
+        path_indexes, dir_fd_indexes = _WRITE_EVENTS[event]
+        # Paths relative to a directory fd (shutil.rmtree internals) cannot be resolved here;
+        # the top-level shutil.rmtree event is checked instead.
+        if any(i < len(args) and args[i] not in (None, -1) for i in dir_fd_indexes):
+            return
+        for i in path_indexes:
+            path_str = _as_path_str(args[i]) if i < len(args) else None
+            if path_str is not None:
+                _check_write(path_str, event, protected)
+        return
 
     if event == "sqlite3.connect" and args:
-        path_arg = args[0]
-        if isinstance(path_arg, str) and _path_under_protected(path_arg, protected):
+        path_str = _as_path_str(args[0])
+        if path_str is not None and _path_under_protected(path_str, protected):
             raise RuntimeError("tripwire: sqlite3.connect on protected path blocked")
-
-    if event == "subprocess.Popen" and args:
-        # Allow only if executable is in allowlist (checked via first arg in some Python versions)
-        pass  # subprocess use is discouraged; tests patch os.environ to disable if needed
 
 
 def install_tripwire(
@@ -76,14 +152,41 @@ def install_tripwire(
     _state["enabled"] = True
     _state["mode"] = mode
     _state["protected"] = tuple(p.resolve() for p in protected_roots if p.exists())
+    _state["write_allowed"] = frozenset()
 
 
 def uninstall_tripwire() -> None:
     _state["enabled"] = False
     _state["mode"] = "off"
     _state["protected"] = ()
+    _state["write_allowed"] = frozenset()
 
 
 def get_protected_roots() -> tuple[Path, ...]:
     p = _state.get("protected")
     return p if isinstance(p, tuple) else ()
+
+
+@contextmanager
+def allow_profile_writes(profile_root: Path, targets: Iterable[Path]) -> Iterator[None]:
+    """Apply mode: protect ``profile_root`` and permit writes only to ``targets``.
+
+    Allowed per target: the file itself, its ``<name>.partial-*`` temp siblings, and creating
+    its missing parent directories. Does nothing when the tripwire is not enabled.
+    """
+    if not _state["enabled"]:
+        yield
+        return
+    previous_protected = _state["protected"]
+    previous_allowed = _state["write_allowed"]
+    protected = previous_protected if isinstance(previous_protected, tuple) else ()
+    root = profile_root.resolve()
+    if root.exists() and root not in protected:
+        protected = (*protected, root)
+    _state["protected"] = protected
+    _state["write_allowed"] = frozenset(_entry_path(t) for t in targets)
+    try:
+        yield
+    finally:
+        _state["protected"] = previous_protected
+        _state["write_allowed"] = previous_allowed

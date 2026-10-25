@@ -1,15 +1,17 @@
-# Architecture (Phase 0–1)
+# Architecture (Phase 0–2)
 
-Layered design: CLI → services → discovery / schemas / bundle → platform / storage → security.
+Layered design: CLI → services → planning / migration / discovery / schemas / bundle → platform / storage → security.
 
 ```
 CLI / reporting
       |
-services (doctor, detect, inspect, backup, verify, list, restore)
+services (doctor, detect, inspect, backup, plan, migrate, …)
       |
-+----------+-----------+----------+
-| discovery| schemas   | bundle   |
-+----------+-----------+----------+
++----------+-----------+----------+-----------+
+| planning | migration | discovery| schemas   |
++----------+-----------+----------+-----------+
+| bundle   |
++----------+
       |
 platform adapters + storage (sqlite snapshot, fs_safe, hashing)
       |
@@ -18,9 +20,9 @@ security (tripwire, scrub, redaction, archive validation)
 
 ## Package layout
 
-`src/cursor_portability/` contains `cli/`, `platform/`, `discovery/`, `schemas/`, `storage/`, `bundle/`, `security/`, `services/`, `reporting/`, `models/`, `errors.py`.
+`src/cursor_portability/` contains `cli/`, `platform/`, `discovery/`, `schemas/`, `storage/`, `bundle/`, `security/`, `services/`, `planning/`, `migration/`, `reporting/`, `models/`, `errors.py`.
 
-`planning/` and `migration/` are reserved for Phase 2+.
+Phase 2 adds read-only `plan create` and journaled `migrate apply` for settings, keybindings, and snippets only. SQLite profile data is not written until Phase 3.
 
 ## Import rules
 

@@ -26,5 +26,5 @@ def run_compatibility() -> CompatibilityReport:
             }
             for adapter in ADAPTERS
         ),
-        "0-1",
+        "0-2",
     )

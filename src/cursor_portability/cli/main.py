@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -10,7 +11,14 @@ from cursor_portability.bundle.restore import restore_bundle
 from cursor_portability.bundle.verify import verify_bundle
 from cursor_portability.cli.output import emit_error, emit_json, emit_text
 from cursor_portability.errors import AppError, ErrorCode, ExitCode
+from cursor_portability.migration.engine import (
+    ApplyOutcome,
+    apply_plan,
+    rollback_run,
+    verify_run,
+)
 from cursor_portability.models.enums import DataCategory
+from cursor_portability.planning.config_merge import ConflictResolution
 from cursor_portability.platform.base import get_platform_paths
 from cursor_portability.platform.env import Environment, current_environment
 from cursor_portability.reporting.log import configure_logging
@@ -21,6 +29,9 @@ from cursor_portability.services.compatibility import run_compatibility
 from cursor_portability.services.detect import run_detect
 from cursor_portability.services.doctor import run_doctor
 from cursor_portability.services.inspect import run_inspect
+from cursor_portability.services.plan import create_plan, show_plan
+
+_RUN_ID_RE = re.compile(r"[0-9a-f]{12}")
 
 
 def _protected_roots(env_path: Path | None = None) -> tuple[Path, ...]:
@@ -121,6 +132,12 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "backup":
         return _backup_dispatch(args, env)
 
+    if args.command == "plan":
+        return _plan_dispatch(args, env)
+
+    if args.command == "migrate":
+        return _migrate_dispatch(args, env)
+
     return ExitCode.USAGE
 
 
@@ -170,6 +187,132 @@ def _backup_dispatch(args: argparse.Namespace, env: Environment) -> int:
             emit_json({"restored_to": str(target)})
         else:
             emit_text(f"Restored to {target}")
+        return ExitCode.PASS
+    return ExitCode.USAGE
+
+
+def _yes_confirmation(assume_yes: bool, prompt: str) -> Callable[[], bool]:
+    def confirm() -> bool:
+        if assume_yes:
+            return True
+        if not sys.stdin.isatty():
+            raise AppError(
+                ErrorCode.OUTPUT_EXISTS,
+                f"{prompt}; run in a terminal or add --yes",
+            )
+        sys.stderr.write(f"{prompt} Type 'yes' to confirm: ")
+        sys.stderr.flush()
+        return sys.stdin.readline().strip() == "yes"
+
+    return confirm
+
+
+def _plan_dispatch(args: argparse.Namespace, env: Environment) -> int:
+    if args.plan_cmd == "create":
+        on_conflict = ConflictResolution.KEEP_DESTINATION
+        if getattr(args, "on_conflict", None) == "unresolved":
+            on_conflict = ConflictResolution.UNRESOLVED
+        use_source = set(args.use_source or [])
+
+        def _ask_map(src: str) -> str:
+            if not sys.stdin.isatty():
+                return ""
+            sys.stderr.write(f"Destination path for {src} (empty=skip): ")
+            sys.stderr.flush()
+            return sys.stdin.readline().strip()
+
+        report = create_plan(
+            env,
+            Path(args.backup),
+            Path(args.output),
+            Path(args.target_profile) if args.target_profile else None,
+            list(args.path_map or []),
+            Path(args.path_map_file) if args.path_map_file else None,
+            args.interactive,
+            _ask_map if args.interactive else None,
+            use_source,
+            on_conflict,
+        )
+        if args.json:
+            emit_json(report.__dict__)
+        else:
+            for w in report.warnings:
+                emit_error(w)
+            emit_text(f"Plan written: {report.plan_path} ({report.plan_id})")
+        return ExitCode.PASS
+    if args.plan_cmd == "show":
+        data = show_plan(Path(args.plan), args.shareable)
+        if args.json:
+            emit_json(data)
+        else:
+            body_obj = data["body"]
+            assert isinstance(body_obj, dict)
+            emit_text(f"Plan {data['plan_id']}")
+            ops = body_obj.get("operations", [])
+            emit_text(f"Operations: {len(ops) if isinstance(ops, list) else 0}")
+        return ExitCode.PASS
+    return ExitCode.USAGE
+
+
+def _migrate_dispatch(args: argparse.Namespace, env: Environment) -> int:
+    runs_dir = Path(args.runs_dir) if args.runs_dir else env.home / ".cursor-portability" / "runs"
+    if args.migrate_cmd == "apply":
+        from cursor_portability.planning.plan import read_plan
+
+        plan = read_plan(Path(args.plan))
+        dest_user = Path(str(plan.body["target_user_data_dir"])) / "User"
+        if not args.json:
+            emit_error("Migration will modify these destination files:")
+            for op in plan.body.get("operations", []):
+                if isinstance(op, dict):
+                    emit_error(f"  - {op.get('target_rel')}")
+        confirmed = _yes_confirmation(args.yes, "Apply migration plan?")()
+        report = apply_plan(
+            Path(args.plan),
+            Path(args.backup),
+            runs_dir,
+            confirmed,
+        )
+        if args.json:
+            emit_json(
+                {
+                    "run_id": report.run_id,
+                    "run_dir": report.run_dir,
+                    "outcome": report.outcome.value,
+                    "operations": report.operations,
+                }
+            )
+        elif report.outcome is ApplyOutcome.ALREADY_APPLIED:
+            emit_text("Apply: already_applied (destination already matches the plan)")
+        else:
+            emit_text(f"Apply: {report.outcome.value} (run {report.run_id})")
+        return ExitCode.PASS
+    if not _RUN_ID_RE.fullmatch(args.run_id):
+        raise AppError(ErrorCode.PLAN_INVALID, "invalid run id", {"run_id": args.run_id})
+    if args.migrate_cmd == "verify":
+        run_dir = runs_dir / args.run_id
+        from cursor_portability.planning.plan import read_plan
+
+        plan = read_plan(run_dir / "plan.json")
+        dest_user = Path(str(plan.body["target_user_data_dir"])) / "User"
+        result = verify_run(run_dir, dest_user)
+        if args.json:
+            emit_json(result)
+        else:
+            emit_text(f"Verify run: {'PASS' if result['ok'] else 'FAIL'}")
+        return ExitCode.PASS if result["ok"] else ExitCode.FAIL
+    if args.migrate_cmd == "rollback":
+        run_dir = runs_dir / args.run_id
+        from cursor_portability.planning.plan import read_plan
+
+        plan = read_plan(run_dir / "plan.json")
+        dest_user = Path(str(plan.body["target_user_data_dir"])) / "User"
+        confirmed = _yes_confirmation(args.yes, "Rollback migration run?")()
+        rollback_run(run_dir, dest_user, confirmed)
+        if args.json:
+            emit_json({"rolled_back": args.run_id})
+        else:
+            emit_text(f"Rolled back run {args.run_id}")
         return ExitCode.PASS
     return ExitCode.USAGE
 
@@ -229,6 +372,36 @@ def _build_parser() -> argparse.ArgumentParser:
     r = bsub.add_parser("restore", parents=[common])
     r.add_argument("bundle")
     r.add_argument("--to", required=True)
+
+    pl = sub.add_parser("plan", parents=[common])
+    plsub = pl.add_subparsers(dest="plan_cmd", required=True)
+    pc = plsub.add_parser("create", parents=[common])
+    pc.add_argument("--backup", required=True)
+    pc.add_argument("--output", required=True)
+    pc.add_argument("--target-profile")
+    pc.add_argument("--path-map", action="append")
+    pc.add_argument("--path-map-file")
+    pc.add_argument("--interactive", action="store_true")
+    pc.add_argument("--on-conflict", choices=["keep-destination", "unresolved"])
+    pc.add_argument("--use-source", action="append")
+    ps = plsub.add_parser("show", parents=[common])
+    ps.add_argument("plan")
+    ps.add_argument("--shareable", action="store_true")
+
+    mg = sub.add_parser("migrate", parents=[common])
+    mgsub = mg.add_subparsers(dest="migrate_cmd", required=True)
+    ma = mgsub.add_parser("apply", parents=[common])
+    ma.add_argument("plan")
+    ma.add_argument("--backup", required=True)
+    ma.add_argument("--yes", action="store_true")
+    ma.add_argument("--runs-dir")
+    mv = mgsub.add_parser("verify", parents=[common])
+    mv.add_argument("--run-id", required=True)
+    mv.add_argument("--runs-dir")
+    mr = mgsub.add_parser("rollback", parents=[common])
+    mr.add_argument("--run-id", required=True)
+    mr.add_argument("--yes", action="store_true")
+    mr.add_argument("--runs-dir")
     return p
 
 

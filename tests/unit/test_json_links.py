@@ -120,18 +120,23 @@ def _snapshot(conn: sqlite3.Connection) -> list[Any]:
 
 def test_rewrite_links_counts_without_writing_then_writes_keeping_storage_types() -> None:
     conn = _db()
-    before = _snapshot(conn)
-    expected = {"chat_headers": 1, "chat_records": 1, "agent_state": {"cursor<path>": 1}}
-    assert rewrite_links(conn, (_LINK,), write=False).as_dict() == expected
-    assert _snapshot(conn) == before
-    assert rewrite_links(conn, (_LINK,), write=True).as_dict() == expected
-    (header,) = conn.execute("SELECT value FROM composerHeaders").fetchone()
-    (record,) = conn.execute("SELECT value FROM cursorDiskKV").fetchone()
-    assert isinstance(header, str) and isinstance(record, bytes)
-    assert json.loads(header)["workspaceIdentifier"] == workspace_ref(_TO, _NEW)
-    assert "café" in header and "\\u" not in header
-    assert json.loads(record) == json.loads(header)
-    secrets = conn.execute(
-        "SELECT value FROM ItemTable WHERE key IN ('cursorAuth/token', 'cursor/apiKey')"
-    ).fetchall()
-    assert all(_OLD in json.loads(v)["workspaceTabs"][0]["props"]["repoPath"] for (v,) in secrets)
+    try:
+        before = _snapshot(conn)
+        expected = {"chat_headers": 1, "chat_records": 1, "agent_state": {"cursor<path>": 1}}
+        assert rewrite_links(conn, (_LINK,), write=False).as_dict() == expected
+        assert _snapshot(conn) == before
+        assert rewrite_links(conn, (_LINK,), write=True).as_dict() == expected
+        (header,) = conn.execute("SELECT value FROM composerHeaders").fetchone()
+        (record,) = conn.execute("SELECT value FROM cursorDiskKV").fetchone()
+        assert isinstance(header, str) and isinstance(record, bytes)
+        assert json.loads(header)["workspaceIdentifier"] == workspace_ref(_TO, _NEW)
+        assert "café" in header and "\\u" not in header
+        assert json.loads(record) == json.loads(header)
+        secrets = conn.execute(
+            "SELECT value FROM ItemTable WHERE key IN ('cursorAuth/token', 'cursor/apiKey')"
+        ).fetchall()
+        assert all(
+            _OLD in json.loads(v)["workspaceTabs"][0]["props"]["repoPath"] for (v,) in secrets
+        )
+    finally:
+        conn.close()

@@ -14,3 +14,4 @@ build/
 *.partial-*/
 fixture-output/
 .DS_Store
+PRD_Cursor_Portability_Toolkit.md

@@ -2,7 +2,10 @@
 
 A local command-line tool for moving your Cursor IDE setup to another computer. It backs up a profile, merges settings into another install, and, after you copy a profile from Linux to macOS, re-points each project and its chats to the project's new folder.
 
-**Unofficial community project.** It is not affiliated with Cursor or Anysphere. Cursor does not publish the format of its local files, so the tool only changes data in layouts it has been tested on and stops on anything it does not recognise.
+> [!CAUTION]
+> **Unofficial. Use at your own risk.** This project is not affiliated with, endorsed by, or supported by Cursor or Anysphere. It changes files that Cursor does not document, and a Cursor update can break it. It comes with no warranty, and the authors are not responsible for lost data or any other damage. Back up your profile and projects first. Read the [disclaimer](DISCLAIMER.md) before use.
+
+Cursor does not publish the format of its local files, so the tool only changes data in layouts it has been tested on and stops on anything it does not recognise.
 
 ## What it does
 
@@ -74,4 +77,4 @@ mypy
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), provided without warranty. See also the [disclaimer](DISCLAIMER.md).

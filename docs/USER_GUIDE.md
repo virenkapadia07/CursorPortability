@@ -1,6 +1,7 @@
 # User guide: moving Cursor to another computer
 
-CursorPortability is an unofficial command-line tool. It is not made by, endorsed by, or affiliated with Cursor or Anysphere.
+> [!CAUTION]
+> **Unofficial. Use at your own risk.** CursorPortability is not made by, endorsed by, affiliated with, or supported by Cursor or Anysphere. It comes with no warranty, and the authors are not responsible for lost data or any other damage. Keep your own backup of your profile and projects before you change anything. Read the [disclaimer](../DISCLAIMER.md) before use.
 
 Cursor does not publish the format of its local files. The tool only changes data in layouts it has been tested on, and it stops without writing anything when it finds something it does not recognise.
 
